@@ -22,7 +22,8 @@ class TableViewCell: UITableViewCell {
         if let visit = visit {
             var log = ""
             if let placemark = visit.placemark {
-                log = String(format: "%@, %@\nARRIVAL - %@\nDEPARTURE - %@",
+                log = String(format: "%@ - %@, %@\nARRIVAL - %@\nDEPARTURE - %@",
+                             placemark.thoroughfare ?? "unkown",
                              placemark.subAdministrativeArea ?? "unknown",
                              placemark.administrativeArea ?? "unknow",
                              visit.visit.arrivalDate.description(with: NSLocale.current),
