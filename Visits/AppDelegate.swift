@@ -7,40 +7,117 @@
 //
 
 import UIKit
+import CoreLocation
 
 @UIApplicationMain
 class AppDelegate: UIResponder, UIApplicationDelegate {
 
     var window: UIWindow?
-
+    var locationManager = CLLocationManager.init()
+    var bgTask: UIBackgroundTaskIdentifier?
+    let geocoder = CLGeocoder()
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Override point for customization after application launch.
+        locationManager.allowsBackgroundLocationUpdates = true
+        locationManager.delegate = self
+        if CLLocationManager.authorizationStatus() == .notDetermined {
+            locationManager.requestAlwaysAuthorization()
+        } else if CLLocationManager.authorizationStatus() == .authorizedAlways {
+            locationManager.startMonitoringVisits()
+        }
         return true
     }
 
     func applicationWillResignActive(_ application: UIApplication) {
-        // Sent when the application is about to move from active to inactive state. This can occur for certain types of temporary interruptions (such as an incoming phone call or SMS message) or when the user quits the application and it begins the transition to the background state.
-        // Use this method to pause ongoing tasks, disable timers, and invalidate graphics rendering callbacks. Games should use this method to pause the game.
     }
 
     func applicationDidEnterBackground(_ application: UIApplication) {
-        // Use this method to release shared resources, save user data, invalidate timers, and store enough application state information to restore your application to its current state in case it is terminated later.
-        // If your application supports background execution, this method is called instead of applicationWillTerminate: when the user quits.
     }
 
     func applicationWillEnterForeground(_ application: UIApplication) {
-        // Called as part of the transition from the background to the active state; here you can undo many of the changes made on entering the background.
     }
 
     func applicationDidBecomeActive(_ application: UIApplication) {
-        // Restart any tasks that were paused (or not yet started) while the application was inactive. If the application was previously in the background, optionally refresh the user interface.
     }
 
     func applicationWillTerminate(_ application: UIApplication) {
-        // Called when the application is about to terminate. Save data if appropriate. See also applicationDidEnterBackground:.
     }
-
-
 }
 
+extension AppDelegate: CLLocationManagerDelegate {
+    
+    func locationManager(_ manager: CLLocationManager, didChangeAuthorization status: CLAuthorizationStatus) {
+        switch status {
+        case .authorizedAlways:
+            locationManager.startMonitoringVisits()
+        default:
+            break
+        }
+    }
+    
+    func locationManager(_ manager: CLLocationManager, didVisit visit: CLVisit) {
+        record(visit: visit)
+    }
+    
+    func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
+        print("ERROR")
+    }
+    
+    func record(visit: CLVisit) {
+        if !isInForeground() {
+            startBGTask(visit: visit)
+        }
+        geo(visit: visit) { visitWrap in
+            Model.shared.add(visit: visitWrap)
+            if !self.isInForeground() {
+                self.endBGTask()
+            }
+        }
+    }
+    
+    func geo(visit: CLVisit, complete: @escaping (Visit) -> ()) {
+        DispatchQueue.global().async {
+            let location = CLLocation(coordinate: visit.coordinate,
+                                      altitude: 0,
+                                      horizontalAccuracy: visit.horizontalAccuracy,
+                                      verticalAccuracy: 0,
+                                      course: 0,
+                                      speed: 0,
+                                      timestamp: Date())
+            self.geocoder.reverseGeocodeLocation(location) { (placemarks, error) in
+                var visitWrap = Visit(visit: visit, timestamp: Date())
+                if error == nil {
+                    if let placemark = placemarks?.first {
+                        visitWrap = Visit(
+                            visit: visit,
+                            timestamp: Date(),
+                            placeMark: placemark)
+                    }
+                }
+                complete(visitWrap)
+            }
+        }
+    }
+    
+    func startBGTask(visit: CLVisit) {
+        bgTask = UIApplication.shared.beginBackgroundTask(withName: "BG", expirationHandler: {
+            if self.geocoder.isGeocoding {
+                self.geocoder.cancelGeocode()
+                let v = Visit(visit: visit, timestamp: Date())
+                Model.shared.add(visit: v, update: false, save: false)
+            }
+            self.endBGTask()
+        })
+    }
+    
+    func endBGTask() {
+        if let task = bgTask {
+            UIApplication.shared.endBackgroundTask(task)
+        }
+        bgTask = UIBackgroundTaskIdentifier.invalid
+    }
+    
+    func isInForeground() -> Bool {
+        return UIApplication.shared.applicationState == .active
+    }
+}
